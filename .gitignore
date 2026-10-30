@@ -1,0 +1,11 @@
+# build output
+*.love
+dist/
+build/
+# LÖVE runtime downloaded by the build script
+tools/love-win64/
+tools/*.zip
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
