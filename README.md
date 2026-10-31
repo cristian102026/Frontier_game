@@ -11,7 +11,7 @@ A top-down 2D open-world shooter made with [LÖVE](https://love2d.org) (Lua). Fi
   - **Endless**: no final boss. A new wave comes every day, and wave 5 is the LAST WAVE.
 - **4 difficulties**: Easy, Normal, Hard and Nightmare.
 - **Gear**
-  - 27 weapons.
+  - 28 weapons, including the Guided Missile: it homes in on its target and kills it outright.
   - 8 utilities: grenades, medkits, smoke bombs, bear traps, decoys, sentry turrets and more.
   - Armor with a shield, in four slots: head, chest, legs and feet.
 - **Credit Shop**: permanent unlocks, Loot Crates and a Loadout (4 weapons, 4 utilities and armor).

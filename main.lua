@@ -206,7 +206,7 @@ for _, id in ipairs(WEAPONS.ORDER) do
         if w.shop == "normal" then X.SHOP_NORMAL[#X.SHOP_NORMAL + 1] = id end
         if w.shop == "fictional" then X.SHOP_FICTION[#X.SHOP_FICTION + 1] = id end
         if w.shop == "fame" then X.SHOP_FAME[#X.SHOP_FAME + 1] = id end
-        if w.shop ~= "fame" then X.CRATE_POOL[#X.CRATE_POOL + 1] = id end
+        if w.shop ~= "fame" and w.chance then X.CRATE_POOL[#X.CRATE_POOL + 1] = id end
     end
 end
 
@@ -2280,7 +2280,7 @@ local function killEnemy(e, angle, by, how)
     if X.BOSSES[e.kind] then X.bossDefeated(e.x, e.y) end
 end
 
--- fx letters (from weapons.lua): b burn, u bubble, f freeze, k knockback, g golden, s silent
+-- fx letters (from weapons.lua): b burn, u bubble, f freeze, k knockback, g golden, s silent, m execute
 local function damageEnemy(e, dmg, angle, isCrit, icy, by, fx)
     if e.dead then return end
     by = by or MPS.id
@@ -2299,6 +2299,7 @@ local function damageEnemy(e, dmg, angle, isCrit, icy, by, fx)
     if fx:find("k", 1, true) and not X.BOSSES[e.kind] then moveEntity(e, cos(angle) * 55, sin(angle) * 55) end
     if icy then dmg = dmg + 5 end           -- Cold Icicles: +5 initial damage
     if admin.on and admin.kills then dmg = max(dmg, e.hp) end   -- admin: one-hit kills
+    if fx:find("m", 1, true) then dmg = max(dmg, e.hp) end      -- Guided Missile: always a kill
     local before = e.hp
     e.hp = e.hp - dmg
     e.hitFlash = 0.12
@@ -3829,7 +3830,7 @@ function updateBullets0(dt)
     local players = MPS.online and X.allPlayers() or nil
     for i = #bullets, 1, -1 do
         local b = bullets[i]
-        if b.kind == "boomerang" or b.homing then X.steerShot(b, dt) end
+        if b.kind == "boomerang" or b.kind == "missile" or b.homing then X.steerShot(b, dt) end
         local nx, ny = b.x + b.vx * dt, b.y + b.vy * dt
         local wallT
         local buf, n = WG.query(min(b.x, nx), min(b.y, ny), abs(nx - b.x), abs(ny - b.y))
@@ -3870,6 +3871,15 @@ function updateBullets0(dt)
                             break
                         elseif b.kind == "bhole" then
                             b.pop = true
+                            break
+                        elseif b.kind == "missile" then
+                            -- Guided Missile: kills the enemy it hits (no splash damage)
+                            X.explode(b.x + (nx - b.x) * t, b.y + (ny - b.y) * t, nil, nil, 60)
+                            if b.owner == "player" then
+                                if not b.shot.hit then b.shot.hit = true stats.shotsHit = stats.shotsHit + 1 end
+                                X.hitEnemy(e, b.shot.dmg, ang, b.shot.crit, b.icy, b.fx)
+                            end
+                            remove = true
                             break
                         end
                         if multi then b.hitSet = b.hitSet or {} b.hitSet[e] = true end
@@ -3990,6 +4000,8 @@ function updateBullets0(dt)
                 -- flames just die on walls
             elseif b.kind == "rocket" then
                 X.explode(hx - cos(ang) * 6, hy - sin(ang) * 6, b.owner, b.shot)
+            elseif b.kind == "missile" then
+                X.explode(hx - cos(ang) * 6, hy - sin(ang) * 6, nil, nil, 60)   -- wasted on the wall
             elseif b.kind == "snowball" then
                 spawnParticles(hx, hy, 10, { 0.95, 0.97, 1 }, 30, 140, 0.5, 3.5, ang + pi, 1.3)
                 playSfx("snowball_hit", 0.15, 0.5 * volAt(hx, hy))
@@ -4013,7 +4025,7 @@ function updateBullets0(dt)
             end
         end
         -- rocket exhaust trail
-        if b.kind == "rocket" and not remove and rand() < 0.8 then
+        if (b.kind == "rocket" or b.kind == "missile") and not remove and rand() < 0.8 then
             spawnParticles(b.x, b.y, 1, rand() < 0.5 and { 1, 0.6, 0.2 } or { 0.45, 0.42, 0.4 }, 10, 40, 0.5, 4, ang + pi, 0.5, 3)
         end
 
@@ -4021,6 +4033,8 @@ function updateBullets0(dt)
         if b.age then b.age = b.age + dt end
         if not remove and b.life <= 0 and b.kind == "rocket" then
             X.explode(nx, ny, b.owner, b.shot)   -- reached its 500 px range
+        elseif not remove and b.life <= 0 and b.kind == "missile" then
+            X.explode(nx, ny, nil, nil, 60)      -- out of fuel
         end
         if remove or b.life <= 0 then
             table.remove(bullets, i)
@@ -4047,6 +4061,26 @@ function X.steerShot(b, dt)
         end
         return
     end
+    if b.kind == "missile" then
+        -- Guided Missile: chases its locked target; if that one dies, locks onto the nearest enemy
+        local tg = b.target
+        if not tg or tg.dead or tg.hidden > 0 then
+            tg, b.target = nil, nil
+            local bd = 900
+            for _, e in ipairs(enemies) do
+                if not e.dead and e.hidden <= 0 then
+                    local d = dist(b.x, b.y, e.x, e.y)
+                    if d < bd then tg, bd = e, d end
+                end
+            end
+            b.target = tg
+        end
+        if tg then
+            local a = turnTowards(atan2(b.vy, b.vx), atan2(tg.y - b.y, tg.x - b.x), 4.5 * dt)
+            b.vx, b.vy = cos(a) * sp, sin(a) * sp
+        end
+        return
+    end
     local cur = atan2(b.vy, b.vx)
     local best, bd = nil, 420
     for _, e in ipairs(enemies) do
@@ -4059,6 +4093,18 @@ function X.steerShot(b, dt)
         local a = turnTowards(cur, atan2(best.y - b.y, best.x - b.x), 6 * dt)
         b.vx, b.vy = cos(a) * sp, sin(a) * sp
     end
+end
+
+-- Guided Missile lock-on: the enemy closest to the cursor (within 300 px), or nil
+function X.missileLock(cx, cy)
+    local best, bd = nil, 300
+    for _, e in ipairs(enemies) do
+        if not e.dead and e.hidden <= 0 then
+            local d = dist(cx, cy, e.x, e.y)
+            if d < bd then best, bd = e, d end
+        end
+    end
+    return best
 end
 
 -- Black Hole Launcher shell: the real vortex lives on the host (or in single player)
@@ -4727,6 +4773,7 @@ function X.hitEnemy(e, dmg, ang, crit, icy, fx)
     if X.gkShielded(e) then X.reflectToMe(dmg, e.x, e.y) return end
     if MPS.role == "client" then
         local shown = dmg + (icy and 5 or 0)
+        if fx and fx:find("m", 1, true) then shown = max(shown, math.ceil(e.hp)) end   -- Guided Missile (the host makes the real kill)
         e.hitFlash = 0.12
         stats.damageDealt = stats.damageDealt + min(shown, max(0, e.hp))
         e.hp = e.hp - shown
@@ -4914,7 +4961,7 @@ function X.fireWeapon(wid, x, y, ang, icy, owner, shot, aim, shooter)
         end
         local sp = w.speed * randRange(0.96, 1.03)
         local kind
-        if w.kind == "rocket" or w.kind == "flame" or w.kind == "boomerang" then kind = w.kind end
+        if w.kind == "rocket" or w.kind == "flame" or w.kind == "boomerang" or w.kind == "missile" then kind = w.kind end
         if w.kind == "blackhole" then kind = "bhole" end
         local range = w.range
         if real and wid == "cannon" then range = range * (1 + (me.cannonBonus or 0)) end   -- Tanky Plate
@@ -4928,6 +4975,8 @@ function X.fireWeapon(wid, x, y, ang, icy, owner, shot, aim, shooter)
         if kind == "boomerang" then
             bullets[#bullets].life = 3
             bullets[#bullets].shot2 = {}
+        elseif kind == "missile" then
+            bullets[#bullets].target = X.missileLock(x + cos(ang) * (aim or 0), y + sin(ang) * (aim or 0))
         end
     end
 end
@@ -8106,6 +8155,17 @@ ICONS.rpg = function()
     c(0.22, 0.24, 0.16) lg.rectangle("fill", 8, 9, 8, 14, 2, 2)
     c(0.15, 0.15, 0.15) lg.rectangle("fill", -6, -18, 16, 9, 2, 2)
 end
+ICONS.missile = function()
+    c(0.28, 0.3, 0.34) lg.rectangle("fill", -58, -11, 92, 22, 4, 4)
+    c(0.38, 0.4, 0.45) lg.rectangle("fill", -58, -11, 92, 6, 4, 4)
+    c(0.85, 0.87, 0.9) lg.rectangle("fill", 30, -7, 26, 14, 2, 2)
+    c(0.9, 0.15, 0.15) lg.polygon("fill", 56, -7, 70, 0, 56, 7)
+    c(0.3, 0.32, 0.36) lg.polygon("fill", 30, -7, 38, -7, 32, -14) lg.polygon("fill", 30, 7, 38, 7, 32, 14)
+    c(0.18, 0.19, 0.22) lg.rectangle("fill", -14, 11, 10, 18, 2, 2)
+    c(0.18, 0.19, 0.22) lg.rectangle("fill", 8, 11, 8, 14, 2, 2)
+    c(0.12, 0.12, 0.14) lg.rectangle("fill", -10, -22, 22, 11, 2, 2)
+    c(1, 0.2, 0.2, (0.6 + 0.4 * sin((menuTime or 0) * 6)) * (X.iconAlpha or 1)) lg.circle("fill", 6, -17, 3)
+end
 ICONS.laser = function()
     local glow = 0.6 + 0.4 * sin((menuTime or 0) * 6)
     c(0.92, 0.92, 0.96) lg.polygon("fill", -40, -10, 20, -14, 36, -6, 36, 4, 20, 10, -40, 8)
@@ -8268,12 +8328,13 @@ local TOP = {
     blackhole = { { 0.25, 0.25, 0.3 }, { 0.5, 0.25, 0.75 } }, meteor = { { 0.35, 0.25, 0.4 }, { 1, 0.55, 0.15 } },
     freezer = { { 0.75, 0.88, 0.96 }, { 0.45, 0.7, 0.9 } }, huntsman = { { 0.2, 0.2, 0.22 }, { 0.5, 0.32, 0.16 } },
     cannon = { { 0.18, 0.18, 0.2 }, { 0.42, 0.28, 0.15 } }, golden = { { 0.95, 0.75, 0.2 }, { 1, 0.9, 0.45 } },
+    missile = { { 0.28, 0.3, 0.34 }, { 0.85, 0.87, 0.9 } },
 }
 function X.drawGunTopNew(id, r, len)
     local t = TOP[id]
     if not t then return false end
     local x0 = r * 0.3
-    local wide = (id == "minigun" or id == "cannon" or id == "blackhole" or id == "flamethrower") and 0.5 or 0.32
+    local wide = (id == "minigun" or id == "cannon" or id == "blackhole" or id == "flamethrower" or id == "missile") and 0.5 or 0.32
     lg.setColor(t[1]) lg.rectangle("fill", x0, r * (0.31 - wide / 2), len, r * wide, 2, 2)
     lg.setColor(t[2]) lg.rectangle("fill", x0 + len * 0.6, r * (0.31 - wide / 4), len * 0.4, r * wide / 2)
     if id == "hammer" then
@@ -8282,6 +8343,8 @@ function X.drawGunTopNew(id, r, len)
         lg.setColor(t[2]) lg.setLineWidth(2) lg.arc("line", "open", x0 + len * 0.7, r * 0.31, 10, -1.6, 1.6) lg.setLineWidth(1)
     elseif id == "boomerang" then
         lg.setColor(t[1]) lg.polygon("fill", x0 + len - 6, r * 0.31 - 8, x0 + len + 6, r * 0.31, x0 + len - 6, r * 0.31 + 8)
+    elseif id == "missile" then
+        lg.setColor(0.9, 0.15, 0.15) lg.polygon("fill", x0 + len, r * 0.31 - 5, x0 + len + 7, r * 0.31, x0 + len, r * 0.31 + 5)
     end
     return true
 end
@@ -9883,6 +9946,20 @@ function drawWorld()
             lg.rectangle("fill", -10, -3.5, 16, 7, 2, 2)
             lg.setColor(0.75, 0.2, 0.15)
             lg.polygon("fill", 6, -3.5, 13, 0, 6, 3.5)
+            lg.pop()
+        elseif bl.kind == "missile" then
+            local a = atan2(bl.vy, bl.vx)
+            lg.push()
+            lg.translate(bl.x, bl.y)
+            lg.rotate(a)
+            lg.setColor(0.5, 0.85, 1, 0.6 + 0.4 * sin(menuTime * 40))
+            lg.circle("fill", -13, 0, 5)
+            lg.setColor(0.85, 0.87, 0.9)
+            lg.rectangle("fill", -11, -3, 18, 6, 2, 2)
+            lg.setColor(0.3, 0.32, 0.36)
+            lg.polygon("fill", -11, -3, -6, -3, -10, -7) lg.polygon("fill", -11, 3, -6, 3, -10, 7)
+            lg.setColor(0.9, 0.15, 0.15)
+            lg.polygon("fill", 7, -3, 14, 0, 7, 3)
             lg.pop()
         elseif (bl.owner == "player" or bl.owner == "remote") and X.drawShot(bl) then
             -- special looks (bubbles, bolts, plasma, flames...)
@@ -12601,10 +12678,18 @@ end
 ------------------------------------------------------------------------------
 -- the item info box (inventory, chest, shop)
 ------------------------------------------------------------------------------
+-- execute weapons (fx "m", the Guided Missile) kill whatever they hit
+function X.executes(w) return w.fx ~= nil and w.fx:find("m", 1, true) ~= nil end
+-- "18-28 DMG", or "INSTANT KILL"
+function X.dmgText(w)
+    if X.executes(w) then return "INSTANT KILL" end
+    return w.min .. "-" .. w.max .. " DMG"
+end
+
 function X.itemInfoLines(id)
     local w, u, a = WEAPONS[id], X.UTIL[id], X.ARMOR[id]
     if w then
-        return w.name, string.format("%d-%d DMG  |  %.1f shots/s  |  %d px  |  speed %s%d%%", w.min, w.max, 1 / w.rate, w.range,
+        return w.name, string.format("%s  |  %.1f shots/s  |  %d px  |  speed %s%d%%", X.dmgText(w), 1 / w.rate, w.range,
             w.mod >= 0 and "+" or "", floor(w.mod * 100 + 0.5)), w.desc
     elseif u then
         return u.name, string.format("%d uses per run  |  cooldown %ds  |  %d credits", u.uses, u.cooldown, u.price), u.desc
@@ -13678,6 +13763,7 @@ local SPECIAL = {
     void = "Bullets pass through walls", tesla = "Chains to up to 3 enemies", ghostbow = "Homing arrows",
     blackhole = "Pulls enemies in for 2 s, then implodes", meteor = "Lands on your cursor after 1 s",
     freezer = "Slows enemies for 2 s", cannon = "Knocks enemies back", golden = "+50% gold per kill",
+    missile = "Homes in on its target - kills it whatever its health",
 }
 local SECTION = { normal = "Normal Shop", fictional = "Fictional Shop", fame = "Hall of Fame" }
 local function pct(c) return (string.format("%.1f", c * 100):gsub("%.0$", "")) .. "%" end
@@ -13714,7 +13800,7 @@ local function statRows(id)
         return rows
     end
     local rows = {
-        { "Damage", w.min .. " - " .. w.max .. (w.blast and " (blast)" or "") },
+        { "Damage", X.executes(w) and "Instant kill" or (w.min .. " - " .. w.max .. (w.blast and " (blast)" or "")) },
         { "Cost", w.price .. " credits  (" .. SECTION[w.shop] .. ")" },
         { "Speed modifier", (w.mod > 0 and "+" or "") .. floor(w.mod * 100 + 0.5) .. "%" },
         { "Range", w.range .. " px" },
@@ -13725,6 +13811,7 @@ local function statRows(id)
     if SPECIAL[id] then rows[#rows + 1] = { "Special", SPECIAL[id] } end
     if X.BLAST[id] then rows[#rows + 1] = { "Blast weapon", "The Guardian is immune" } end
     if w.ammoCost and w.ammoCost < 1 then rows[#rows + 1] = { "Ammo use", "1 Ammo per 3 shots" } end
+    if w.ammoCost and w.ammoCost > 1 then rows[#rows + 1] = { "Ammo use", w.ammoCost .. " Ammo per shot" } end
     rows[#rows + 1] = { "Loot Crate chance", w.chance and pct(w.chance) or "Never - buy only" }
     return rows
 end
@@ -13885,8 +13972,8 @@ function X.drawCredits()
                 shadowText(name, tx, cy + 10, listW - 340, "left", (w and w.shop == "fame") and { 1, 0.85, 0.4 } or PAL.text, fonts.medium)
                 local l2, l3
                 if w then
-                    l2 = string.format("%d-%d DMG  |  %.1f/s  |  %s%d%%", w.min, w.max, 1 / w.rate, w.mod >= 0 and "+" or "", floor(w.mod * 100 + 0.5))
-                    l3 = w.chance and (pct(w.chance) .. " in Loot Crates") or "Hall of Fame - buy only"
+                    l2 = string.format("%s  |  %.1f/s  |  %s%d%%", X.dmgText(w), 1 / w.rate, w.mod >= 0 and "+" or "", floor(w.mod * 100 + 0.5))
+                    l3 = w.chance and (pct(w.chance) .. " in Loot Crates") or (w.shop == "fame" and "Hall of Fame - buy only" or "Buy only")
                 elseif u then
                     l2 = string.format("%d uses per run  |  cooldown %ds", u.uses, u.cooldown)
                     l3 = pct(u.chance) .. " in Utility Crates"
