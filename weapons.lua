@@ -4,12 +4,14 @@
     Every gun uses the same universal "Ammo".
       range  = how far a shot travels (px)        mod    = movement speed modifier while held
       rate   = seconds between shots              price  = Credit Shop price (permanent weapon)
-      chance = Loot Crate odds (Hall of Fame weapons can never be pulled from crates)
+      chance = Loot Crate odds (nil = buy-only; Hall of Fame weapons can never be pulled from crates)
       shop   = "normal" | "fictional" | "fame"   (nil = not sold for credits)
       kind   = how the weapon fires:
-               bullet, rocket, laser, flame, boomerang, hammer, tesla, blackhole, meteor
+               bullet, rocket, missile, laser, flame, boomerang, hammer, tesla, blackhole, meteor
       fx     = effects on hit: b = burn, u = bubble (trapped), f = freeze (slow),
-               k = knockback, g = golden (+50% gold), s = silent (doesn't alert)
+               k = knockback, g = golden (+50% gold), s = silent (doesn't alert),
+               m = execute (kills the enemy it hits, whatever its health)
+      ammoCost = Ammo used per shot (default 1)
 ]]
 
 local rad = math.rad
@@ -85,6 +87,9 @@ local W = {
     meteor = { shop = "fictional", name = "Meteor Caller", min = 100, max = 130, rate = 8, range = 700,
         mod = -0.20, kind = "meteor", blast = 120, sound = "meteor", shake = 2, len = 22, price = 250, chance = 1.5,
         desc = "A meteor crashes down on your cursor 1 second later." },
+    missile = { shop = "fictional", name = "Guided Missile", min = 150, max = 150, rate = 6, spread = 0, speed = 520, range = 1600,
+        mod = -0.25, kind = "missile", fx = "m", ammoCost = 5, sound = "rpg_fire", shake = 6, kick = 40, len = 30, price = 300,
+        desc = "Locks onto the enemy nearest your cursor and chases it. Kills whatever it hits, whatever its health. 5 Ammo per shot." },
 
     -- sold by the travelling merchant in Endless (gold, this run only) ---------
     axe = { name = "Battle Axe", min = 50, max = 50, rate = 0.8, range = 90, noAmmo = true,
@@ -112,6 +117,7 @@ W.ORDER = {
     "revolver", "swifter", "uzi", "spray", "crossbow", "flamethrower", "rifle", "sniper", "minigun", "rpg",
     "bubble", "laser", "boomerang", "hammer", "void", "plasma", "tesla", "ghostbow", "blackhole", "meteor",
     "freezer", "huntsman", "cannon", "golden", "axe",
+    "missile",   -- added last: saved loadouts store indices into this list
 }
 
 for _, id in ipairs(W.ORDER) do
